@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Security;
@@ -26,6 +27,47 @@ public static class Extensions {
             new Vector4(mat.M41, mat.M42, mat.M43, mat.M44)
         );
 }
+
+static class AssetCache {
+    static readonly string CacheDir;
+    static readonly ConcurrentDictionary<Uuid, string> Entries = new();
+    static readonly ConcurrentDictionary<Uuid, WeakReference<byte[]>> Data = new();
+
+    static AssetCache() {
+        CacheDir = Path.Combine(Application.persistentDataPath, "Cache");
+        if(!Directory.Exists(CacheDir))
+            Directory.CreateDirectory(CacheDir);
+        foreach(var fn in Directory.GetFiles(CacheDir)) {
+            var us = Path.GetFileName(fn);
+            var uuid = new Uuid(ulong.Parse(us[..16], NumberStyles.HexNumber), ulong.Parse(us[16..], NumberStyles.HexNumber));
+            Entries[uuid] = Path.GetFullPath(fn);
+        }
+    }
+    
+    public static void EnsureInit() {}
+
+    public static async Task<byte[]> GetEntry(Uuid key, Func<Uuid, Task<byte[]>> onMiss = null) {
+        if(Data.TryGetValue(key, out var dr) && dr.TryGetTarget(out var data)) return data;
+        if(Entries.TryGetValue(key, out var fn)) {
+            data = await File.ReadAllBytesAsync(fn);
+            Data[key] = new(data);
+            return data;
+        }
+        if(onMiss == null) return null;
+
+        fn = Path.GetFullPath(Path.Combine(CacheDir, key.ToString()));
+        var fe = File.Exists(fn);
+        data = fe
+            ? await File.ReadAllBytesAsync(fn)
+            : await onMiss(key);
+        if(data == null) return null;
+        if(!fe) await File.WriteAllBytesAsync(fn, data);
+        Entries[key] = fn;
+        Data[key] = new(data);
+        return data;
+    }
+}
+
 public class WorldBehaviour : MonoBehaviour
 {
     class ClientRoot : BaseRoot {
@@ -47,6 +89,13 @@ public class WorldBehaviour : MonoBehaviour
     void OnMain(Action func) => MainThreadTasks.Enqueue(func);
 
     async void Start() {
+        var acc = new TaskCompletionSource<bool>();
+        OnMain(() => {
+            AssetCache.EnsureInit();
+            acc.SetResult(true);
+        });
+        await acc.Task;
+        
         var tclient = new TcpClient("localhost", 12345);
         var stream = new SslStream(tclient.GetStream(), false, (_, _, _, _) => true);
         await stream.AuthenticateAsClientAsync("");
@@ -70,10 +119,10 @@ public class WorldBehaviour : MonoBehaviour
 
             foreach(var entity in entities) {
                 Debug.Log("Getting asset for entity");
-                var asset = await assetDelivery.FetchAssetById(entity.AssetId);
+                var data = await AssetCache.GetEntry(entity.AssetId, async key => (await assetDelivery.FetchAssetById(entity.AssetId)).Data);
                 Debug.Log("Got asset! Starting async load of GLB");
                 OnMain(() =>
-                    Importer.ImportGLBAsync(asset.Data, new() { animationSettings = { useLegacyClips = true } }, (obj, animations) => {
+                    Importer.ImportGLBAsync(data, new() { animationSettings = { useLegacyClips = true } }, (obj, animations) => {
                         Debug.Log("Finished loading GLTF; adding.");
                         var holder = new GameObject("Transformer");
                         holder.transform.SetParent(gameObject.transform);
@@ -110,7 +159,6 @@ public class WorldBehaviour : MonoBehaviour
         });
     }
 
-    // Update is called once per frame
     void Update() {
         while(MainThreadTasks.TryDequeue(out var func))
             func();
