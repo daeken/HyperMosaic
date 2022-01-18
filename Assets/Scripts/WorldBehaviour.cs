@@ -72,8 +72,6 @@ public class WorldBehaviour : MonoBehaviour
 {
     class ClientRoot : BaseRoot {
         public ClientRoot(IConnection connection) : base(connection) {}
-        public override async Task<string[]> ListInterfaces() => new[] { "hypercosm.object.v1.0.0", "hypercosm.root.v0.1.0" };
-        public override async Task Release() {}
         public override async Task<string[]> ListExtensions() => new[] { "hypercosm.assetdelivery.v0.1.0", "hypercosm.world.v0.1.0" };
         public override async Task Ping() {
         }
