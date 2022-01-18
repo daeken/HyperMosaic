@@ -110,7 +110,7 @@ public class WorldBehaviour : MonoBehaviour
         await conn.Handshake();
 
         var adObj = await conn.RemoteRoot.GetObjectByName("hypercosm.assetdelivery.v0.1.0");
-        var assetDelivery = conn.GetObject(adObj.ObjectId, id => new RemoteAssetdelivery(conn, id));
+        var assetDelivery = conn.GetObject(adObj.ObjectId, id => new RemoteAssetDelivery(conn, id));
         var wObj = await conn.RemoteRoot.GetObjectByName("hypercosm.world.v0.1.0");
         var world = conn.GetObject(wObj.ObjectId, id => new RemoteWorld(conn, id));
 
@@ -119,7 +119,7 @@ public class WorldBehaviour : MonoBehaviour
 
             foreach(var entity in entities) {
                 Debug.Log("Getting asset for entity");
-                var data = await AssetCache.GetEntry(entity.AssetId, async key => (await assetDelivery.FetchAssetById(entity.AssetId)).Data);
+                var data = await AssetCache.GetEntry(entity.AssetId, async key => (await assetDelivery.FetchById(entity.AssetId)).Data);
                 Debug.Log("Got asset! Starting async load of GLB");
                 OnMain(() =>
                     Importer.ImportGLBAsync(data, new() { animationSettings = { useLegacyClips = true } }, (obj, animations) => {
